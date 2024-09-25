@@ -11,4 +11,4 @@ app.include_router(siteparse.router)
 # Root endpoint
 @app.get("/")
 def read_root():
-    return {"message": "Welcome to the Hashtag Generator API!"}
+    return {"message": "Welcome to the Hashtag Generator API Designed for Mobile App"}
