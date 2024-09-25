@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+g4f
+pydantic
+g4f[all]
+curl_cffi
+g4f[openai]
+beautifulsoup4
+httpx
