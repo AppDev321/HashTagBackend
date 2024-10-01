@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from typing import List, Union
 import httpx
@@ -7,6 +7,10 @@ import asyncio
 import datetime
 import json
 import os
+from sqlalchemy.orm import Session
+from models.hashtag_database_model import SessionLocal, SearchTag
+
+
 
 
 # File paths
@@ -14,6 +18,16 @@ cache_file = "/tmp/hashtags_cache.json"
 
 
 router = APIRouter()
+
+
+
+# Dependency
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 class HashtagData(BaseModel):
     id: int
@@ -85,7 +99,7 @@ async def get_best_hash_tags() -> List[HashtagData]:
 
     return data_list
 
-async def get_search_hash_tags(searchValue: str) -> SearchTagResponse:
+async def get_search_hash_tags(searchValue: str, db: Session) -> SearchTagResponse:
     base_url = f"https://best-hashtags.com/hashtag/{searchValue}"
     recommended_tags = []
     best_tags = []
@@ -94,6 +108,25 @@ async def get_search_hash_tags(searchValue: str) -> SearchTagResponse:
     popular_tags = []
     related_tags = []
 
+
+    # Check if any tags already exist in the database
+    existing_tags = db.query(SearchTag).filter(SearchTag.searchWord == searchValue).first()
+
+    if existing_tags: 
+        # return same list of tags in response class
+        print("Fetch search record from database")
+        return SearchTagResponse(
+            best=[HashtagData(**tag) for tag in existing_tags.best],
+            top=[HashtagData(**tag) for tag in existing_tags.top],
+            recommended=[HashtagData(**tag) for tag in existing_tags.recommended],
+            exact=[HashtagData(**tag) for tag in existing_tags.exact],
+            popular=[HashtagData(**tag) for tag in existing_tags.popular],
+            related=[HashtagData(**tag) for tag in existing_tags.related],
+        )
+    
+    
+    
+    print("Fetch search record from website")
     async with httpx.AsyncClient() as client:
         try:
             async with semaphore:  # Limit concurrency
@@ -185,6 +218,9 @@ async def get_search_hash_tags(searchValue: str) -> SearchTagResponse:
         except Exception as e:
             print(f"An error occurred: {e}")
 
+    # Store same list of tags in database 
+    store_search_hashtags(searchValue, best_tags, top_tags, recommended_tags, exact_tags, popular_tags, related_tags)
+
     return SearchTagResponse(
         best=best_tags,
         exact=exact_tags,
@@ -193,6 +229,24 @@ async def get_search_hash_tags(searchValue: str) -> SearchTagResponse:
         top=top_tags,
         recommended=recommended_tags
     )
+
+def store_search_hashtags(search_word, best_tags, top_tags, recommended_tags, exact_tags, popular_tags, related_tags):
+    db = SessionLocal()
+    try:
+        new_entry = SearchTag(
+            searchWord=search_word,
+            best=[tag.dict() for tag in best_tags],         
+            top=[tag.dict() for tag in top_tags],
+            recommended=[tag.dict() for tag in recommended_tags],
+            exact=[tag.dict() for tag in exact_tags],
+            popular=[tag.dict() for tag in popular_tags],
+            related=[tag.dict() for tag in related_tags]
+        )
+        db.add(new_entry)
+        db.commit()
+    finally:
+        db.close()
+
 
 @router.get("/getNewTags", response_model=dict)
 async def get_new_tags():
@@ -234,8 +288,8 @@ async def get_best_tags():
     }
 
 @router.get("/getSearchTags/{value}", response_model=dict)
-async def get_search_tags(value: str):
-    data = await get_search_hash_tags(searchValue=value)
+async def get_search_tags(value: str, db: Session = Depends(get_db)):
+    data = await get_search_hash_tags(searchValue=value, db=db)  # Pass the db session here
     if not (data.best or data.top or data.recommended or data.exact or data.popular or data.related):
         return {
             "status": False,

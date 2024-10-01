@@ -7,3 +7,5 @@ curl_cffi
 g4f[openai]
 beautifulsoup4
 httpx
+sqlalchemy
+asyncpg
